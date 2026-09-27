@@ -39,7 +39,7 @@ pip install -r requirements.txt
 cd backend && python3 app.py
 ```
 
-Open <http://localhost:8000>. Local limit is 10 GB per capture and nothing leaves the machine.
+Open <http://localhost:8000>.
 
 CCESS_KEY` (the key the app asks for) and `CRON_SECRET` (any random string).
 4. Redeploy.
