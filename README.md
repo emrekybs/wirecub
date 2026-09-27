@@ -41,7 +41,3 @@ cd backend && python3 app.py
 
 Open <http://localhost:8000>.
 
-CCESS_KEY` (the key the app asks for) and `CRON_SECRET` (any random string).
-4. Redeploy.
-
-Hosted limits: 200 MB and 5 minutes per capture. Captures are deleted after analysis, reports after 7 days.
