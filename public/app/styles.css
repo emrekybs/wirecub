@@ -1524,3 +1524,7 @@ input::placeholder { color: var(--ink-4); }
 @media (prefers-reduced-motion: reduce) {
   .sonar-rings span, .progress-sonar span { animation: none; opacity: 0; }
 }
+
+.gh-link { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.gh-link .gh-ico { width: 15px; height: 15px; }
+@media (max-width: 720px) { .gh-link span { display: none; } }
