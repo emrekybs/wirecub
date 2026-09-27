@@ -93,7 +93,10 @@
       }
       if (c.retention_days) set('factKeep', `${c.retention_days} day${c.retention_days === 1 ? '' : 's'}`);
       const key = document.getElementById('factKey');
-      if (key && !c.auth_required) key.remove();
+      if (key && !c.auth_required) {
+        if (c.hosted) key.textContent = 'Your history is listed only in your own browser; nobody else sees your analyses';
+        else key.remove();
+      }
       if (!c.hosted) {
         // Served by a local install: describe this machine, not Vercel.
         set('runHostedTitle', 'This instance');

@@ -95,6 +95,13 @@ TIME_BUDGET = _env_int("WIRECUB_TIME_BUDGET", 280 if HOSTED else 0)
 RETENTION_DAYS = _env_int("WIRECUB_RETENTION_DAYS", 7 if HOSTED else 0)
 
 ACCESS_KEY = os.environ.get("WIRECUB_ACCESS_KEY", "").strip()
+
+# Who sees the History list. On your own machine, or on a hosted instance
+# behind an access key, everyone using it is the same person or team, so
+# the list is shared. A hosted instance open to anyone never lists other
+# people's analyses: each browser keeps the ids of its own and asks for
+# those alone. An id is 64 random bits, so a report cannot be guessed.
+SHARED_HISTORY = (not HOSTED) or bool(ACCESS_KEY)
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 
 # Largest response a Vercel function may return.
@@ -559,7 +566,7 @@ async def get_config(request: Request):
         "authenticated": _authorised(request),
         "store_ready": store_error is None,
         "store_error": store_error,
-        "open_to_public": HOSTED and not ACCESS_KEY,
+        "shared_history": SHARED_HISTORY,
     }
 
 
@@ -1071,10 +1078,13 @@ async def compare(baseline: str, current: str, request: Request):
     return _json(request, export.compare_reports(old, new))
 
 
-def _history(limit: int) -> list[dict]:
+def _history(limit: int, ids: list[str] | None) -> list[dict]:
     store = _store()
-    keys = [item["key"] for item in store.list("index/")
-            if item["key"].endswith(".json")]
+    if ids is not None:
+        keys = [f"index/{job_id}.json" for job_id in ids]
+    else:
+        keys = [item["key"] for item in store.list("index/")
+                if item["key"].endswith(".json")]
     if hasattr(store, "get_many"):
         blobs = store.get_many(keys)
     else:
@@ -1092,10 +1102,17 @@ def _history(limit: int) -> list[dict]:
 
 
 @app.get("/api/history")
-async def get_history(limit: int = 50):
+async def get_history(limit: int = 50, ids: str = ""):
     limit = max(1, min(200, limit))
+    wanted = None
+    if not SHARED_HISTORY:
+        # Only the analyses this browser ran, named by id. Without ids
+        # there is nothing to list, never everyone's.
+        wanted = [i for i in dict.fromkeys(ids.split(",")) if _ID_RE.fullmatch(i)][:200]
+        if not wanted:
+            return []
     try:
-        return await run_in_threadpool(_history, limit)
+        return await run_in_threadpool(_history, limit, wanted)
     except StoreError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

@@ -154,8 +154,16 @@ def main():
         else:
             check("smb fixture produced a file", False)
 
-    status, history, _ = call("GET", "/api/history")
-    check("history lists analyses", status == 200 and len(history) >= len(ids), str(status))
+    if config.get("shared_history", True):
+        status, history, _ = call("GET", "/api/history")
+        check("history lists analyses", status == 200 and len(history) >= len(ids), str(status))
+    else:
+        status, history, _ = call("GET", "/api/history")
+        check("open instance lists nothing without ids", status == 200 and history == [], str(history)[:80])
+        some = list(ids.values())[:2]
+        status, history, _ = call("GET", "/api/history?ids=" + ",".join(some))
+        check("open instance lists only the ids asked for",
+              status == 200 and sorted(r["id"] for r in history) == sorted(some), str(status))
 
     a, b = ids.get("scenario.pcapng"), ids.get("scenario2.pcapng")
     status, diff, _ = call("GET", f"/api/compare?baseline={a}&current={b}")

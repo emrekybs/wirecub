@@ -145,6 +145,26 @@ function setupAuth() {
   });
 }
 
+/* ------------------------------------------------ this browser's list */
+
+/* On an open hosted instance the server never lists everyone's analyses.
+   The browser remembers the ids of the ones it ran and asks for those. */
+const MINE_KEY = 'wirecub.analyses';
+
+function mine() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
+    return Array.isArray(ids) ? ids.filter((id) => /^[0-9a-f]{16}$/.test(id)) : [];
+  } catch { return []; }
+}
+
+function saveMine(ids) {
+  try { localStorage.setItem(MINE_KEY, JSON.stringify(ids.slice(0, 200))); } catch { /* private mode */ }
+}
+
+function rememberMine(id) { saveMine([id, ...mine().filter((x) => x !== id)]); }
+function forgetMine(id) { saveMine(mine().filter((x) => x !== id)); }
+
 /* --------------------------------------------------------------- views */
 
 function showView(name) {
@@ -177,15 +197,14 @@ async function loadConfig() {
         ${esc(c.max_upload_label)} per capture${c.time_budget_seconds
           ? ` and ${Math.round(c.time_budget_seconds / 60)} minutes of analysis` : ''}.
         For larger captures run WireCub locally.`);
-      if (c.open_to_public) {
-        parts.push(`<strong>No access key is set</strong>, so anyone with the
-          address can use this instance and open its history. Set
-          <code>WIRECUB_ACCESS_KEY</code> in the Vercel project settings.`);
+      if (!c.shared_history) {
+        parts.push(`<strong>Your analyses are yours.</strong> History lists
+          only what was analysed in this browser; nobody else sees it.`);
       }
     }
     notice.innerHTML = parts.map((p) => `<p>${p}</p>`).join('');
     notice.hidden = parts.length === 0;
-    notice.classList.toggle('banner-red', !c.store_ready || c.open_to_public);
+    notice.classList.toggle('banner-red', !c.store_ready);
   }
   $('logoutBtn').hidden = !c.auth_required;
   if (c.auth_required && !c.authenticated) showAuth();
@@ -373,6 +392,7 @@ async function runAnalysis(plan, file, controller) {
   if (outcome.type === 'failed') throw new ApiError(outcome.error || 'Analysis failed.', 0);
   if (outcome.type === 'cancelled') { resetToUpload(); return; }
   setProgress(100, 'Loading the report');
+  rememberMine(outcome.job_id);
   await loadReport(outcome.job_id);
 }
 
@@ -1878,10 +1898,15 @@ async function showHistory() {
   list.innerHTML = '<div class="card"><p class="note">Loading…</p></div>';
   showView('history');
 
+  const shared = state.config ? state.config.shared_history !== false : true;
   let rows;
   try {
-    const res = await api('/api/history');
+    const ids = shared ? [] : mine();
+    const res = await api(shared ? '/api/history'
+      : `/api/history?ids=${ids.join(',')}`);
     rows = await res.json();
+    // Reports expire on the server; drop ids that no longer answer.
+    if (!shared) saveMine(ids.filter((id) => rows.some((row) => row.id === id)));
   } catch (err) {
     list.innerHTML = `<div class="card"><p class="note">${esc(err.message)}</p></div>`;
     return;
@@ -1931,6 +1956,7 @@ async function showHistory() {
       button.disabled = true;
       try {
         await api(`/api/history/${button.dataset.id}`, { method: 'DELETE' });
+        forgetMine(button.dataset.id);
         row.remove();
         if (state.jobId === button.dataset.id) { state.jobId = null; resetState(); }
         updateComparePicks();
