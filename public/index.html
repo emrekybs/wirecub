@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WireCub — packet capture analysis for SOC analysts</title>
+<meta name="description" content="Upload a .pcap or .pcapng. WireCub rebuilds the conversations, pulls out files and credentials, and ranks what matters, with the reasoning shown for every finding.">
+<meta name="theme-color" content="#0a1530">
+<meta property="og:title" content="WireCub — read a capture, get an answer">
+<meta property="og:description" content="Packet capture analysis for SOC analysts and incident responders. Findings with the reasoning shown, not just a severity label.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<link rel="preload" href="/app/fonts/chakra-petch-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/app/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a href="/" class="nav-logo" aria-label="WireCub home">
+      <img src="/assets/wirecub-logo.webp" alt="WireCub" width="190" height="68">
+    </a>
+    <nav class="nav-links" aria-label="Page sections">
+      <a href="#views">The views</a>
+      <a href="#finds">What it finds</a>
+      <a href="#pipeline">How it reads</a>
+      <a href="#run">Hosted or local</a>
+    </nav>
+    <a class="btn btn-primary nav-cta" href="/app/">Open WireCub</a>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- Hero: a real capture on the left, the answer WireCub gives on the right -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <h1><span>Read a capture.</span> <span>Get an answer.</span></h1>
+        <div class="hero-side">
+        <p class="lede">Give WireCub a <code>.pcap</code> or <code>.pcapng</code>.
+          It rebuilds the conversations inside, pulls out the files and
+          credentials that crossed the wire, and ranks what deserves your
+          attention. Every finding says what was seen, why it matters and
+          what to do next.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/app/">Open WireCub</a>
+          <a class="btn btn-quiet" href="/samples/wirecub-sample.pcapng" download>Download the sample capture</a>
+        </div>
+        <p class="hero-note">Built for SOC analysts and incident responders.
+          The parser is WireCub's own: no tshark, Zeek or Wireshark underneath.</p>
+        </div>
+      </div>
+
+      <figure class="demo" aria-label="Packets from the sample capture and the finding WireCub raised from them">
+        <div class="demo-packets">
+          <div class="demo-head">
+            <span>sample.pcapng</span>
+            <span class="demo-filter">tcp.flags == SYN &amp;&amp; ip.dst == 45.77.13.9</span>
+          </div>
+          <table class="pkt">
+            <thead>
+              <tr><th>No.</th><th>Time</th><th>Source</th><th>Destination</th><th class="num">Since last</th></tr>
+            </thead>
+            <tbody id="pktRows">
+              <tr><td>1</td><td>0.000</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">—</td></tr>
+              <tr><td>35</td><td>60.621</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">60.62 s</td></tr>
+              <tr><td>67</td><td>119.800</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">59.18 s</td></tr>
+              <tr><td>101</td><td>180.729</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">60.93 s</td></tr>
+              <tr><td>133</td><td>240.559</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">59.83 s</td></tr>
+              <tr><td>136</td><td>299.963</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">59.40 s</td></tr>
+              <tr><td>289</td><td>360.932</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">60.97 s</td></tr>
+              <tr><td>297</td><td>419.977</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">59.05 s</td></tr>
+              <tr class="pkt-gap"><td colspan="5">36 more connections, the same minute apart</td></tr>
+              <tr><td>450</td><td>2639.827</td><td>192.168.1.50</td><td>45.77.13.9:443</td><td class="num">58.81 s</td></tr>
+            </tbody>
+          </table>
+          <div class="beat">
+            <svg id="beat" viewBox="0 0 600 44" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div class="beat-scale"><span>0 min</span><span>45 connections to one address</span><span>44 min</span></div>
+          </div>
+        </div>
+
+        <div class="demo-answer" id="demoAnswer">
+          <p class="sev sev-critical">Critical</p>
+          <h2>Regular automated callbacks to an external host</h2>
+          <dl>
+            <dt>Seen</dt>
+            <dd>192.168.1.50 reaches 45.77.13.9 on port 443 every 59.94 s
+              across 45 connections, with 1.4% timing variation.</dd>
+            <dt>Why it matters</dt>
+            <dd>Traffic this regular comes from software on a timer, not a
+              person. Malware checks in with its operator on a fixed
+              interval; legitimate software polls too, so the destination
+              decides the verdict.</dd>
+            <dt>Next</dt>
+            <dd>Check whether the destination is a service this host should
+              use. If not, treat the host as compromised: capture memory,
+              find the process holding the connection, block the address.</dd>
+          </dl>
+          <p class="attack">MITRE ATT&amp;CK <span>T1071</span> <span>T1573</span> <span>T1102</span></p>
+        </div>
+        <figcaption>From the sample capture: 452 packets over 44 minutes. WireCub
+          raised 21 findings from it; this is the first one it lists.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Real screens -->
+  <section class="section" id="views">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>One capture, seen from every side</h2>
+        <p>These are the screens WireCub shows for the sample capture, unedited.</p>
+      </div>
+
+      <div class="views">
+        <div class="view-tabs" role="tablist" aria-label="Screens">
+          <button role="tab" aria-selected="true" aria-controls="viewShot" data-shot="findings"
+                  data-text="Every detection, ranked. Open one and it explains what was seen, why it matters, what to do next, and the evidence behind it.">Findings</button>
+          <button role="tab" aria-selected="false" aria-controls="viewShot" data-shot="attacks"
+                  data-text="Attempts against a host, with the payload exactly as it crossed the wire and where in the request it arrived.">Attacks</button>
+          <button role="tab" aria-selected="false" aria-controls="viewShot" data-shot="timeline"
+                  data-text="Findings, credentials, files, calls and first contact with each outside address, merged into one sequence: what followed what.">Timeline</button>
+          <button role="tab" aria-selected="false" aria-controls="viewShot" data-shot="map"
+                  data-text="Hosts grouped by subnet, coloured by role and risk. Suspicious links are drawn in red. Downloads as PNG or SVG.">Network map</button>
+          <button role="tab" aria-selected="false" aria-controls="viewShot" data-shot="overview"
+                  data-text="A risk score with the verdict in words, then the capture's shape: traffic over time, protocols, the busiest hosts.">Overview</button>
+          <button role="tab" aria-selected="false" aria-controls="viewShot" data-shot="credentials"
+                  data-text="Usernames and secrets recovered from the traffic, separated into what is readable now and what has to be cracked first.">Credentials</button>
+        </div>
+        <p class="view-text" id="viewText">Every detection, ranked. Open one and it explains what was seen, why it matters, what to do next, and the evidence behind it.</p>
+        <div class="shot-frame">
+          <img id="viewShot" role="tabpanel" src="/assets/shots/findings.webp" width="1600" height="1000"
+               alt="WireCub findings screen for the sample capture" loading="lazy" decoding="async">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coverage -->
+  <section class="section section-band" id="finds">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>What it looks for</h2>
+        <p>Detections run on every capture. There is no quick mode that skips
+          checks, so an empty tab means nothing was found, not that nothing was looked at.</p>
+      </div>
+      <dl class="finds">
+        <div>
+          <dt>Attacks</dt>
+          <dd>Port scans, C2 beaconing, DNS tunnelling and DGA domains, SQL
+            injection, XSS, path traversal, RCE and Log4Shell with the payload
+            shown as it arrived, exfiltration, lateral movement, web and reverse shells.</dd>
+        </div>
+        <div>
+          <dt>Credentials</dt>
+          <dd>Usernames and passwords from FTP, Telnet (line and character
+            mode), POP3, IMAP, SMTP, HTTP Basic and Digest, SMB and SIP.
+            Readable secrets are kept apart from hashes that need cracking.</dd>
+        </div>
+        <div>
+          <dt>Windows</dt>
+          <dd>NTLMv1, password spraying, one account spreading across hosts,
+            Kerberoasting with the targeted service account named, SMB1,
+            unsigned and null sessions.</dd>
+        </div>
+        <div>
+          <dt>Files</dt>
+          <dd>Rebuilt from the packets and hashed with MD5, SHA-1, SHA-256 and
+            imphash. Signatures for PowerShell staging, Office macros, ransom
+            notes, shadow copy deletion, packers, credential dumpers and leaked keys.</dd>
+        </div>
+        <div>
+          <dt>Ransomware</dt>
+          <dd>High-rate writes across file shares, ransom notes and known
+            encrypted-file extensions.</dd>
+        </div>
+        <div>
+          <dt>Telephony</dt>
+          <dd>SIP calls rebuilt: who called whom, answered or not, duration,
+            codec, packet loss. Unencrypted audio, registration attacks and spoofed INVITEs.</dd>
+        </div>
+        <div>
+          <dt>OT, IoT and wireless</dt>
+          <dd>Modbus, S7comm, DNP3 and BACnet write commands, controllers
+            reachable from outside, anonymous MQTT, deauthentication floods,
+            evil twins, captured WPA handshakes.</dd>
+        </div>
+        <div>
+          <dt>Context</dt>
+          <dd>Typosquatted domains, Tor and VPN egress, QUIC with the server
+            name recovered, and sandbox environments, so you know when the
+            outside of a capture was simulated.</dd>
+        </div>
+      </dl>
+      <p class="finds-foot">Results export as HTML, JSON, STIX 2.1, MISP and
+        CSV. Two captures of the same network can be compared: new hosts, new
+        destinations, findings that appeared and findings that went away.</p>
+    </div>
+  </section>
+
+  <!-- Pipeline: a real sequence, so it is numbered -->
+  <section class="section" id="pipeline">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>How a capture is read</h2>
+        <p>The same six steps for every file, in this order.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Open</h3>
+          <p>pcap and pcapng, plain or compressed with gzip, bzip2 or zstd.
+            Ethernet, Linux cooked, raw IP, VLAN and QinQ, MPLS, GRE, VXLAN and Geneve.</p>
+        </li>
+        <li>
+          <h3>Decode</h3>
+          <p>Every layer of every packet. IPv4 and IPv6 fragments are put back
+            together before anything reads them.</p>
+        </li>
+        <li>
+          <h3>Rebuild</h3>
+          <p>TCP streams reassembled in order, retransmissions and overlaps
+            resolved, then HTTP, SMB and SIP sessions reconstructed from them.</p>
+        </li>
+        <li>
+          <h3>Extract</h3>
+          <p>Files carved out and hashed. Credentials recovered. TLS server
+            names and fingerprints recorded.</p>
+        </li>
+        <li>
+          <h3>Detect</h3>
+          <p>Detection modules run over the whole result and map what they
+            find to MITRE ATT&amp;CK techniques.</p>
+        </li>
+        <li>
+          <h3>Score</h3>
+          <p>Findings are ranked by severity and confidence into one risk
+            score and a verdict written as a sentence.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Deployment -->
+  <section class="section section-band" id="run">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Hosted here, or on your own machine</h2>
+        <p>Captures carry passwords and private traffic. If a capture should
+          not leave your network, run WireCub locally; it is the same program.</p>
+      </div>
+
+      <div class="run">
+        <div class="run-col" id="runHosted">
+          <h3 id="runHostedTitle">This site</h3>
+          <ul class="facts">
+            <li><strong id="factSize">200 MB</strong> per capture</li>
+            <li class="hosted-only"><strong id="factTime">5 minutes</strong> of analysis per capture</li>
+            <li class="hosted-only">The capture is deleted once it has been analysed</li>
+            <li class="hosted-only">Reports and carved files are kept in private storage for
+              <strong id="factKeep">7 days</strong>, then removed</li>
+            <li id="factKey">Protected by an access key set by the owner</li>
+          </ul>
+          <a class="btn btn-primary" href="/app/">Open WireCub</a>
+        </div>
+
+        <div class="run-col">
+          <h3>Your machine</h3>
+          <ul class="facts">
+            <li><strong>10 GB</strong> per capture</li>
+            <li>Memory stays flat as captures grow: a 1 GB file takes about
+              90 seconds at roughly 900 MB</li>
+            <li>Nothing leaves the machine. Only the optional reputation
+              feeds reach the internet, and never during an analysis</li>
+            <li>Needs Python 3.11 or newer, nothing else</li>
+          </ul>
+          <div class="code">
+            <p>Docker</p>
+            <pre><code>docker compose up -d --build</code></pre>
+            <p>Debian, Ubuntu, Kali</p>
+            <pre><code>./install.sh &amp;&amp; wirecub</code></pre>
+            <p>Then open <code>http://localhost:8000</code></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <img src="/assets/icon-180.png" alt="" width="44" height="44">
+    <p>WireCub <span id="footVersion">1.4</span>. Packet capture analysis for
+      SOC analysts and incident responders.</p>
+    <nav aria-label="Footer">
+      <a href="/app/">Open WireCub</a>
+      <a href="/samples/wirecub-sample.pcapng" download>Sample capture</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+services:
+  wirecub:
+    build: .
+    container_name: wirecub
+    ports:
+      - "8000:8000"
+    volumes:
+      - wirecub-data:/data
+    environment:
+      # Raise or lower the single-capture upload ceiling (bytes).
+      WIRECUB_MAX_UPLOAD: "10737418240"
+    restart: unless-stopped
+
+volumes:
+  wirecub-data:

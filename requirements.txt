@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+zstandard>=0.22
+# Vercel Blob client. Only imported when WireCub runs on Vercel.
+vercel>=0.11

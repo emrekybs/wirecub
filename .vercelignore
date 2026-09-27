@@ -1,0 +1,15 @@
+# Only index.py, backend/, public/ and requirements.txt are needed on Vercel.
+data/
+tests/
+docs/
+*.pcap
+*.pcapng
+*.cap
+Dockerfile
+docker-compose.yml
+install.sh
+.dockerignore
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/

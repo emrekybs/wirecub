@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WireCub — PCAP analysis</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/app/logo-mark.png">
+<link rel="stylesheet" href="/app/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/" title="About WireCub">
+    <img src="/app/logo.png" alt="WireCub" class="brand-logo">
+  </a>
+  <div class="topbar-actions">
+    <span class="capture-chip" id="captureChip" hidden></span>
+    <span class="build-stamp" id="buildStamp" title="Running build"></span>
+    <button class="ghost-btn" id="historyBtn">History</button>
+    <button class="ghost-btn" id="newScanBtn" hidden>New scan</button>
+    <button class="ghost-btn" id="logoutBtn" hidden title="Forget the access key on this browser">Sign out</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ================= UPLOAD ================= -->
+  <section class="view view-upload" id="viewUpload">
+    <div class="upload-wrap">
+      <div class="upload-intro">
+        <h1>Read a capture. Get an answer.</h1>
+        <p>Drop a packet capture below. WireCub decodes every layer, maps the
+           network, and tells you what is worth your attention — with the
+           reasoning shown, not just a list of alerts.</p>
+      </div>
+
+      <div class="sonar-zone" id="dropZone" tabindex="0" role="button"
+           aria-label="Upload a capture file">
+        <div class="sonar-rings" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="sonar-core">
+          <svg viewBox="0 0 48 48" class="sonar-icon" aria-hidden="true">
+            <path d="M24 6v24M24 30l-8-8M24 30l8-8" fill="none"
+                  stroke="currentColor" stroke-width="3"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 34v4a4 4 0 004 4h24a4 4 0 004-4v-4" fill="none"
+                  stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+          <strong>PCAP upload</strong>
+          <span>Drop a file here, or click to browse</span>
+          <em id="limitLabel">.pcap · .pcapng · .cap — gzip, bzip2 and zstd
+            accepted</em>
+        </div>
+        <input type="file" id="fileInput" hidden
+               accept=".pcap,.pcapng,.cap,.dmp,.gz,.bz2,.zst,.ntar">
+      </div>
+
+      <div class="scan-note">
+        <b>One scan, everything extracted.</b> Every capture is fully
+        analysed — TCP reassembly, file carving, credential recovery, and
+        every detection module. There is nothing to configure.
+      </div>
+
+      <p class="upload-error" id="uploadError" hidden></p>
+      <div class="banner banner-amber hosted-notice" id="hostedNotice" hidden></div>
+    </div>
+  </section>
+
+  <!-- ================= PROGRESS ================= -->
+  <section class="view view-progress" id="viewProgress" hidden>
+    <div class="progress-wrap">
+      <div class="progress-sonar" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <h2 id="progressFile">Analysing</h2>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <p class="progress-message" id="progressMessage">Opening capture</p>
+      <p class="progress-percent" id="progressPercent">0%</p>
+      <button class="ghost-btn" id="cancelBtn">Cancel</button>
+    </div>
+  </section>
+
+  <!-- ================= RESULTS ================= -->
+  <section class="view view-results" id="viewResults" hidden>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="findings">Findings<span class="tab-count" id="tabCountFindings"></span></button>
+      <button class="tab" data-tab="attacks" hidden>Attacks<span class="tab-count" id="tabCountAttacks"></span></button>
+      <button class="tab" data-tab="credentials" hidden>Credentials<span class="tab-count" id="tabCountCreds"></span></button>
+      <button class="tab" data-tab="timeline">Timeline</button>
+      <button class="tab" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="map">Network map</button>
+      <button class="tab" data-tab="hosts">Hosts<span class="tab-count" id="tabCountHosts"></span></button>
+      <button class="tab" data-tab="reputation">Reputation</button>
+      <button class="tab" data-tab="files" hidden>Files<span class="tab-count" id="tabCountFiles"></span></button>
+      <button class="tab" data-tab="voip" hidden>Calls<span class="tab-count" id="tabCountCalls"></span></button>
+      <button class="tab" data-tab="flows">Flows</button>
+      <button class="tab" data-tab="streams" hidden>Streams</button>
+      <button class="tab" data-tab="dns">DNS</button>
+      <button class="tab" data-tab="http">HTTP</button>
+      <button class="tab" data-tab="tls">TLS</button>
+      <button class="tab" data-tab="windows" hidden>Windows</button>
+      <button class="tab" data-tab="ot" hidden>OT &amp; IoT</button>
+      <button class="tab" data-tab="wireless" hidden>Wireless</button>
+      <button class="tab" data-tab="iocs">Indicators</button>
+      <button class="tab" data-tab="export">Export</button>
+    </nav>
+
+    <div class="panel" id="panelFindings"></div>
+    <div class="panel" id="panelTimeline" hidden></div>
+    <div class="panel" id="panelOverview" hidden></div>
+    
+
+    <div class="panel panel-map" id="panelMap" hidden>
+      <div class="map-toolbar">
+        <div class="map-filters">
+          <label class="switch"><input type="checkbox" id="filterInternal" checked><span>Internal</span></label>
+          <label class="switch"><input type="checkbox" id="filterExternal" checked><span>External</span></label>
+          <label class="switch"><input type="checkbox" id="filterRiskOnly"><span>At-risk only</span></label>
+        </div>
+        <input type="search" id="mapSearch" placeholder="Find a host or hostname" class="map-search">
+        <div class="map-buttons">
+          <select id="layoutPick" class="map-select" aria-label="Layout">
+            <option value="cose">Force-directed</option>
+            <option value="concentric">Concentric by risk</option>
+            <option value="grid">Grid by subnet</option>
+          </select>
+          <button class="ghost-btn small" id="mapFit">Fit</button>
+        <button class="ghost-btn small" id="mapPng">Download PNG</button>
+        <button class="ghost-btn small" id="mapSvg">Download SVG</button>
+        </div>
+      </div>
+      <div class="map-stage">
+        <div id="graph"></div>
+        <aside class="host-panel" id="hostPanel" hidden></aside>
+        <div class="map-legend">
+          <span><i class="dot" style="background:#0ca678"></i>Client</span>
+          <span><i class="dot" style="background:#3b5bdb"></i>Server</span>
+          <span><i class="dot" style="background:#c2255c"></i>Hub</span>
+          <span><i class="dot" style="background:#7c3aed"></i>Gateway</span>
+          <span><i class="dot" style="background:#5c7cfa"></i>Resolver</span>
+          <span><i class="dot" style="background:#38d9a9"></i>Cloud / CDN</span>
+          <span><i class="dot" style="background:#a3adbe"></i>External</span>
+          <span><i class="dot" style="background:#c48a00"></i>Some risk</span>
+          <span><i class="dot" style="background:#e8590c"></i>Elevated</span>
+          <span><i class="dot" style="background:#d6336c"></i>High risk</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panelAttacks" hidden></div>
+    <div class="panel" id="panelCredentials" hidden></div>
+    <div class="panel" id="panelHosts" hidden></div>
+    <div class="panel" id="panelReputation" hidden></div>
+    <div class="panel" id="panelFiles" hidden></div>
+    <div class="panel" id="panelVoip" hidden></div>
+    <div class="panel" id="panelFlows" hidden></div>
+    <div class="panel" id="panelStreams" hidden></div>
+    <div class="panel" id="panelDns" hidden></div>
+    <div class="panel" id="panelHttp" hidden></div>
+    <div class="panel" id="panelTls" hidden></div>
+    <div class="panel" id="panelWindows" hidden></div>
+    <div class="panel" id="panelOt" hidden></div>
+    <div class="panel" id="panelWireless" hidden></div>
+    <div class="panel" id="panelIocs" hidden></div>
+    <div class="panel" id="panelExport" hidden></div>
+
+  </section>
+
+  <!-- ================= HISTORY ================= -->
+  <section class="view view-history" id="viewHistory" hidden>
+    <h2 class="section-title">Previous analyses</h2>
+    <p class="note" id="compareHint">Select two analyses to compare a capture
+      against an earlier baseline of the same network.</p>
+    <div class="compare-bar" id="compareBar" hidden>
+      <span id="compareLabel"></span>
+      <button class="ghost-btn small" id="compareRun">Compare</button>
+      <button class="ghost-btn small" id="compareClear">Clear</button>
+    </div>
+    <div id="compareResult"></div>
+    <div id="historyList"></div>
+  </section>
+
+</main>
+
+<dialog class="auth-dialog" id="authDialog">
+  <form id="authForm" method="dialog">
+    <img src="/app/logo-mark.png" alt="" class="auth-mark">
+    <h2>Access key</h2>
+    <p class="note">This WireCub is protected. Enter the key its owner set
+      in <code>WIRECUB_ACCESS_KEY</code>. It is remembered on this browser
+      for 30 days.</p>
+    <input type="password" id="authKey" autocomplete="current-password"
+           placeholder="Access key" required>
+    <p class="upload-error" id="authError" hidden></p>
+    <button type="submit" class="primary-btn">Unlock</button>
+  </form>
+</dialog>
+
+<script src="/app/cytoscape.min.js"></script>
+<script src="/app/app.js"></script>
+</body>
+</html>
