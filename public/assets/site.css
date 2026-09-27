@@ -234,6 +234,12 @@ code { font-family: var(--mono); font-size: .9em; }
 .finds dd { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; max-width: 34em; }
 .finds-foot { margin: 36px 0 0; padding-top: 24px; border-top: 1px solid var(--sea-3); color: var(--ink-2); max-width: 46em; }
 
+/* Privacy */
+.privacy { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: clamp(32px, 5vw, 72px); }
+.privacy > div { padding: 22px 0; border-top: 1px solid var(--sea-3); }
+.privacy dt { font: 600 20px var(--display); }
+.privacy dd { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; max-width: 34em; }
+
 /* Pipeline */
 .steps {
   list-style: none; margin: 0; padding: 0;
@@ -297,7 +303,7 @@ code { font-family: var(--mono); font-size: .9em; }
   .pkt .pkt-gap td { display: table-cell; }
   .demo-packets, .demo-answer { padding: 18px 16px; }
   .demo figcaption { padding: 12px 16px; }
-  .finds, .run, .steps { grid-template-columns: 1fr; }
+  .finds, .run, .steps, .privacy { grid-template-columns: 1fr; }
   .hero-actions .btn { flex: 1 1 100%; }
   .foot nav { margin-left: 0; width: 100%; }
 }

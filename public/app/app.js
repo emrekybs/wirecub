@@ -145,25 +145,25 @@ function setupAuth() {
   });
 }
 
-/* ------------------------------------------------ this browser's list */
+/* --------------------------------------------------- nothing is kept */
 
-/* On an open hosted instance the server never lists everyone's analyses.
-   The browser remembers the ids of the ones it ran and asks for those. */
-const MINE_KEY = 'wirecub.analyses';
-
-function mine() {
-  try {
-    const ids = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
-    return Array.isArray(ids) ? ids.filter((id) => /^[0-9a-f]{16}$/.test(id)) : [];
-  } catch { return []; }
+/* On a hosted instance the report is deleted when the page lets go of it:
+   a new scan, closing the tab, leaving the page. The server also expires
+   anything left behind. Locally reports stay in the history. */
+function keepsNothing() {
+  return Boolean(state.config && state.config.hosted && !state.config.history);
 }
 
-function saveMine(ids) {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(ids.slice(0, 200))); } catch { /* private mode */ }
+function discardReport(id) {
+  if (!id || !keepsNothing()) return;
+  const url = `/api/reports/${id}/discard`;
+  // sendBeacon survives the page closing; fetch with keepalive is the fallback.
+  if (!(navigator.sendBeacon && navigator.sendBeacon(url))) {
+    fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+  }
 }
 
-function rememberMine(id) { saveMine([id, ...mine().filter((x) => x !== id)]); }
-function forgetMine(id) { saveMine(mine().filter((x) => x !== id)); }
+window.addEventListener('pagehide', () => discardReport(state.jobId));
 
 /* --------------------------------------------------------------- views */
 
@@ -191,15 +191,17 @@ async function loadConfig() {
     if (!c.store_ready) {
       parts.push(`<strong>Storage is not set up.</strong> ${esc(c.store_error || '')}`);
     } else if (c.hosted) {
-      parts.push(`<strong>Hosted instance.</strong> Captures are processed on
-        this server and results are kept privately
-        ${c.retention_days ? `for ${c.retention_days} days` : ''}. Up to
+      parts.push(`<strong>Hosted instance.</strong> Up to
         ${esc(c.max_upload_label)} per capture${c.time_budget_seconds
           ? ` and ${Math.round(c.time_budget_seconds / 60)} minutes of analysis` : ''}.
-        For larger captures run WireCub locally.`);
-      if (!c.shared_history) {
-        parts.push(`<strong>Your analyses are yours.</strong> History lists
-          only what was analysed in this browser; nobody else sees it.`);
+        For larger captures, or captures that must not leave your network,
+        run WireCub locally.`);
+      if (!c.history) {
+        parts.push(`<strong>Nothing is kept.</strong> Your capture is deleted
+          the moment the analysis ends. The report and any extracted files are
+          deleted when you close this page or start a new scan${
+          c.report_ttl_minutes ? `, and after ${c.report_ttl_minutes === 60 ? 'an hour' : `${c.report_ttl_minutes} minutes`} at most` : ''}.
+          There is no history and no account.`);
       }
     }
     notice.innerHTML = parts.map((p) => `<p>${p}</p>`).join('');
@@ -207,6 +209,7 @@ async function loadConfig() {
     notice.classList.toggle('banner-red', !c.store_ready);
   }
   $('logoutBtn').hidden = !c.auth_required;
+  $('historyBtn').hidden = !c.history;
   if (c.auth_required && !c.authenticated) showAuth();
 }
 
@@ -261,6 +264,7 @@ function resetState() {
 
 function resetToUpload() {
   if (state.abort) { state.abort.abort(); state.abort = null; }
+  if (state.report) discardReport(state.jobId);
   state.jobId = null;
   resetState();
   $('fileInput').value = '';
@@ -392,7 +396,6 @@ async function runAnalysis(plan, file, controller) {
   if (outcome.type === 'failed') throw new ApiError(outcome.error || 'Analysis failed.', 0);
   if (outcome.type === 'cancelled') { resetToUpload(); return; }
   setProgress(100, 'Loading the report');
-  rememberMine(outcome.job_id);
   await loadReport(outcome.job_id);
 }
 
@@ -1210,7 +1213,30 @@ function renderExport() {
                `${t.charAt(0).toUpperCase()}${t.slice(1)} CSV`,
                `One row per ${t === 'iocs' ? 'indicator' : t.replace(/s$/, '')}.`)).join('')}
       </div>
-    </div>`;
+    </div>
+    ${keepsNothing() ? `
+    <div class="card">
+      <h3>Done with it?</h3>
+      <p class="note">This report is deleted when you close the page. Delete
+        it now if you have what you need; downloads you already saved are
+        not affected.</p>
+      <button class="ghost-btn" id="deleteNowBtn">Delete this report now</button>
+    </div>` : ''}`;
+
+  const del = $('deleteNowBtn');
+  if (del) {
+    del.onclick = async () => {
+      del.disabled = true;
+      try {
+        await api(`/api/reports/${id}/discard`, { method: 'POST' });
+        state.report = null;
+        resetToUpload();
+      } catch (err) {
+        del.disabled = false;
+        alert(err.message);
+      }
+    };
+  }
 }
 
 /* ------------------------------------------------------------ overview */
@@ -1898,15 +1924,10 @@ async function showHistory() {
   list.innerHTML = '<div class="card"><p class="note">Loading…</p></div>';
   showView('history');
 
-  const shared = state.config ? state.config.shared_history !== false : true;
   let rows;
   try {
-    const ids = shared ? [] : mine();
-    const res = await api(shared ? '/api/history'
-      : `/api/history?ids=${ids.join(',')}`);
+    const res = await api('/api/history');
     rows = await res.json();
-    // Reports expire on the server; drop ids that no longer answer.
-    if (!shared) saveMine(ids.filter((id) => rows.some((row) => row.id === id)));
   } catch (err) {
     list.innerHTML = `<div class="card"><p class="note">${esc(err.message)}</p></div>`;
     return;
@@ -1956,7 +1977,6 @@ async function showHistory() {
       button.disabled = true;
       try {
         await api(`/api/history/${button.dataset.id}`, { method: 'DELETE' });
-        forgetMine(button.dataset.id);
         row.remove();
         if (state.jobId === button.dataset.id) { state.jobId = null; resetState(); }
         updateComparePicks();
@@ -2153,24 +2173,3 @@ function escapeXml(value) {
     { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
   ));
 }
-
-
-/* Show which build is answering. A container that was not rebuilt serves
-   an older interface and is otherwise indistinguishable from a current
-   one, so the running version is put on screen rather than left to be
-   inferred from what the page looks like. */
-(async () => {
-  try {
-    const res = await fetch('/api/version', { cache: 'no-store' });
-    const data = await res.json();
-    const el = document.getElementById('buildStamp');
-    if (el) {
-      el.textContent = `v${data.version} · ${data.asset_hash}`;
-      el.title = data.hosted ? 'Hosted build'
-        : `Interface build ${data.asset_hash}. If this does not change after `
-          + 'an upgrade, the container was not rebuilt.';
-    }
-  } catch (err) {
-    /* Version display is a convenience; never let it break the page. */
-  }
-})();

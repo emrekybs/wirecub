@@ -90,18 +90,17 @@ MAX_UPLOAD_BYTES = _env_int(
 # explanation rather than a dropped connection. Zero means no budget.
 TIME_BUDGET = _env_int("WIRECUB_TIME_BUDGET", 280 if HOSTED else 0)
 
-# Hosted analyses expire; a public deployment should not accumulate other
-# people's credentials forever. Zero keeps everything.
-RETENTION_DAYS = _env_int("WIRECUB_RETENTION_DAYS", 7 if HOSTED else 0)
-
 ACCESS_KEY = os.environ.get("WIRECUB_ACCESS_KEY", "").strip()
 
-# Who sees the History list. On your own machine, or on a hosted instance
-# behind an access key, everyone using it is the same person or team, so
-# the list is shared. A hosted instance open to anyone never lists other
-# people's analyses: each browser keeps the ids of its own and asks for
-# those alone. An id is 64 random bits, so a report cannot be guessed.
-SHARED_HISTORY = (not HOSTED) or bool(ACCESS_KEY)
+# A hosted instance keeps nothing it does not need. The capture is deleted
+# when the analysis ends; the report and carved files live only while
+# someone is reading them: the page asks for them to be deleted when it is
+# closed, and anything left over expires after REPORT_TTL_MINUTES. There is
+# no history. On your own machine the history stays, since the data never
+# left it; WIRECUB_RETENTION_DAYS can expire it there too.
+HISTORY = (not HOSTED) or (os.environ.get("WIRECUB_HISTORY") == "1" and bool(ACCESS_KEY))
+REPORT_TTL_MINUTES = _env_int("WIRECUB_REPORT_TTL_MINUTES", 60 if HOSTED else 0)
+RETENTION_DAYS = _env_int("WIRECUB_RETENTION_DAYS", 0)
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 
 # Largest response a Vercel function may return.
@@ -195,7 +194,10 @@ def _load_report_bytes(job_id: str) -> bytes:
         if legacy is not None:
             return gzip.compress(legacy, compresslevel=5)
     if data is None:
-        raise HTTPException(status_code=404, detail="No report for that analysis.")
+        raise HTTPException(status_code=404, detail=(
+            "This report no longer exists. Reports are deleted when their "
+            "page is closed, and after an hour at most; analyse the capture "
+            "again to see it." if HOSTED else "No report for that analysis."))
     return data
 
 
@@ -440,9 +442,10 @@ def _run_analysis(job: Job, upload_id: str, chunks: int, emit) -> dict:
                     store.put_file(f"artifacts/{job.id}/{path.name}", path)
 
         store.put(_report_key(job.id), encoded, "application/gzip")
-        store.put(f"index/{job.id}.json",
-                  json.dumps(_index_entry(job, report)).encode(),
-                  "application/json")
+        if HISTORY:
+            store.put(f"index/{job.id}.json",
+                      json.dumps(_index_entry(job, report)).encode(),
+                      "application/json")
         succeeded = True
         return report
 
@@ -564,11 +567,12 @@ async def get_config(request: Request):
         "accepted_formats": list(ALLOWED_SUFFIXES),
         "time_budget_seconds": TIME_BUDGET,
         "retention_days": RETENTION_DAYS,
+        "report_ttl_minutes": REPORT_TTL_MINUTES,
         "auth_required": bool(ACCESS_KEY),
         "authenticated": _authorised(request),
         "store_ready": store_error is None,
         "store_error": store_error,
-        "shared_history": SHARED_HISTORY,
+        "history": HISTORY,
     }
 
 
@@ -697,6 +701,11 @@ async def analyze_upload(upload_id: str, request: Request):
                     events.put({"type": "cancelled", "job_id": job.id})
                     events.put(None)
                     return
+        if HOSTED:
+            try:
+                _purge_expired()
+            except (StoreError, HTTPException, OSError):
+                pass  # the nightly cleanup catches up
         try:
             _run_analysis(job, upload_id, chunks, emit)
             events.put({"type": "done", "job_id": job.id})
@@ -1080,17 +1089,11 @@ async def compare(baseline: str, current: str, request: Request):
     return _json(request, export.compare_reports(old, new))
 
 
-def _history(limit: int, ids: list[str] | None) -> list[dict]:
+def _history(limit: int) -> list[dict]:
     store = _store()
-    if ids is not None:
-        keys = [f"index/{job_id}.json" for job_id in ids]
-    else:
-        keys = [item["key"] for item in store.list("index/")
-                if item["key"].endswith(".json")]
-    if hasattr(store, "get_many"):
-        blobs = store.get_many(keys)
-    else:
-        blobs = {key: store.get(key) for key in keys}
+    keys = [item["key"] for item in store.list("index/")
+            if item["key"].endswith(".json")]
+    blobs = store.get_many(keys)
     rows = []
     for data in blobs.values():
         if not data:
@@ -1104,17 +1107,12 @@ def _history(limit: int, ids: list[str] | None) -> list[dict]:
 
 
 @app.get("/api/history")
-async def get_history(limit: int = 50, ids: str = ""):
+async def get_history(limit: int = 50):
+    if not HISTORY:
+        raise HTTPException(status_code=404, detail="This instance keeps no history.")
     limit = max(1, min(200, limit))
-    wanted = None
-    if not SHARED_HISTORY:
-        # Only the analyses this browser ran, named by id. Without ids
-        # there is nothing to list, never everyone's.
-        wanted = [i for i in dict.fromkeys(ids.split(",")) if _ID_RE.fullmatch(i)][:200]
-        if not wanted:
-            return []
     try:
-        return await run_in_threadpool(_history, limit, wanted)
+        return await run_in_threadpool(_history, limit)
     except StoreError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -1131,6 +1129,7 @@ def _delete_analysis(job_id: str) -> None:
 
 
 @app.delete("/api/history/{job_id}")
+@app.post("/api/reports/{job_id}/discard")
 async def delete_analysis(job_id: str):
     _check_id(job_id)
     with JOBS_LOCK:
@@ -1146,25 +1145,50 @@ async def delete_analysis(job_id: str):
 
 # --------------------------------------------------------------- maintenance
 
-def _cleanup() -> dict:
+def _purge_older_than(prefixes: tuple[str, ...], max_age: float) -> int:
+    """Delete every stored object under these prefixes older than max_age."""
     store = _store()
+    cutoff = time.time() - max_age
+    stale = [item for prefix in prefixes for item in store.list(prefix)
+             if item["uploaded"] < cutoff]
+    if stale:
+        store.delete_items(stale)
+        for item in stale:
+            match = re.search(r"([0-9a-f]{16})", item["key"])
+            if match:
+                _forget_report(match.group(1))
+    return len(stale)
+
+
+_LAST_PURGE = {"at": 0.0}
+
+
+def _purge_expired(force: bool = False) -> dict:
+    """
+    Remove what has outlived its purpose.
+
+    Runs from the nightly cron and, at most every few minutes, when an
+    analysis starts, so expiry does not wait for the night on a busy day.
+    """
     now = time.time()
-    removed_analyses = 0
+    if not force and now - _LAST_PURGE["at"] < 300:
+        return {}
+    _LAST_PURGE["at"] = now
+    removed = 0
+    if REPORT_TTL_MINUTES > 0:
+        removed += _purge_older_than(("reports/", "artifacts/", "index/"),
+                                     REPORT_TTL_MINUTES * 60)
     if RETENTION_DAYS > 0:
-        cutoff = now - RETENTION_DAYS * 86400
-        for item in store.list("index/"):
-            job_id = item["key"].rsplit("/", 1)[-1].removesuffix(".json")
-            if _ID_RE.fullmatch(job_id) and item["uploaded"] < cutoff:
-                _delete_analysis(job_id)
-                removed_analyses += 1
+        removed += _purge_older_than(("reports/", "artifacts/", "index/"),
+                                     RETENTION_DAYS * 86400)
     # Uploads that never reached analysis: abandoned tabs, dropped links.
-    stale = 0
-    for item in store.list("uploads/"):
-        if item["uploaded"] < now - 6 * 3600:
-            store.delete_prefix(item["key"])
-            stale += 1
-    return {"removed_analyses": removed_analyses, "removed_upload_parts": stale,
+    removed += _purge_older_than(("uploads/",), 3 * 3600)
+    return {"removed": removed, "report_ttl_minutes": REPORT_TTL_MINUTES,
             "retention_days": RETENTION_DAYS}
+
+
+def _cleanup() -> dict:
+    return _purge_expired(force=True)
 
 
 @app.get("/api/maintenance/cleanup")

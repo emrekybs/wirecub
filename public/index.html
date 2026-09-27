@@ -32,6 +32,7 @@
       <a href="#finds">What it finds</a>
       <a href="#pipeline">How it reads</a>
       <a href="#run">Hosted or local</a>
+      <a href="#privacy" class="hosted-only">Privacy</a>
     </nav>
     <a class="btn btn-primary nav-cta" href="/app/">Open WireCub</a>
   </div>
@@ -264,10 +265,11 @@
           <ul class="facts">
             <li><strong id="factSize">200 MB</strong> per capture</li>
             <li class="hosted-only"><strong id="factTime">5 minutes</strong> of analysis per capture</li>
-            <li class="hosted-only">The capture is deleted once it has been analysed</li>
-            <li class="hosted-only">Reports and carved files are kept in private storage for
-              <strong id="factKeep">7 days</strong>, then removed</li>
-            <li id="factKey">Protected by an access key set by the owner</li>
+            <li class="hosted-only">Your capture is deleted the moment the analysis ends</li>
+            <li class="hosted-only">The report is deleted when you close the page, and after
+              <strong id="factKeep">an hour</strong> at most</li>
+            <li class="hosted-only">No history, no account, no sign-up</li>
+            <li id="factKey" hidden>Protected by an access key set by the owner</li>
           </ul>
           <a class="btn btn-primary" href="/app/">Open WireCub</a>
         </div>
@@ -294,16 +296,60 @@
     </div>
   </section>
 
+  <section class="section hosted-only" id="privacy">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>What happens to your capture</h2>
+        <p>Packet captures hold passwords, cookies and private conversations.
+          This site is built to forget them.</p>
+      </div>
+      <dl class="privacy">
+        <div>
+          <dt>The capture is not stored</dt>
+          <dd>It is analysed on the server and deleted the moment the analysis
+            ends, whether it succeeds or not.</dd>
+        </div>
+        <div>
+          <dt>The report is temporary</dt>
+          <dd>The report and any files extracted from the traffic exist only
+            while you read them. They are deleted when you close the page or
+            start a new scan, and automatically after <span class="ttl">an hour</span>
+            if the page never gets the chance to say so. Downloads you save stay
+            yours.</dd>
+        </div>
+        <div>
+          <dt>There is no history</dt>
+          <dd>No list of analyses is kept anywhere. Nobody else using WireCub
+            can see what you uploaded, and you cannot see theirs.</dd>
+        </div>
+        <div>
+          <dt>No account, no tracking</dt>
+          <dd>No sign-up, no cookies, no analytics. Vercel, which hosts the site,
+            keeps its usual short-lived request logs.</dd>
+        </div>
+        <div>
+          <dt>Nothing goes to third parties</dt>
+          <dd>Only if you switch on live network context in the Reputation tab
+            are the external IP addresses of the capture, and nothing else, sent
+            to ip-api.com to look up their owner and location.</dd>
+        </div>
+      </dl>
+      <p class="finds-foot">If a capture must not leave your network, run
+        WireCub on your own machine. It is the same program and keeps everything local.</p>
+    </div>
+  </section>
+
 </main>
 
 <footer class="foot">
   <div class="wrap foot-inner">
     <img src="/assets/icon-180.png" alt="" width="44" height="44">
-    <p>WireCub <span id="footVersion">1.4</span>. Packet capture analysis for
+    <p>WireCub. Packet capture analysis for
       SOC analysts and incident responders.</p>
     <nav aria-label="Footer">
       <a href="/app/">Open WireCub</a>
       <a href="/samples/wirecub-sample.pcapng" download>Sample capture</a>
+      <a href="#privacy" class="hosted-only">Privacy</a>
     </nav>
   </div>
 </footer>

@@ -154,16 +154,17 @@ def main():
         else:
             check("smb fixture produced a file", False)
 
-    if config.get("shared_history", True):
+    if config.get("history", True):
         status, history, _ = call("GET", "/api/history")
         check("history lists analyses", status == 200 and len(history) >= len(ids), str(status))
     else:
-        status, history, _ = call("GET", "/api/history")
-        check("open instance lists nothing without ids", status == 200 and history == [], str(history)[:80])
-        some = list(ids.values())[:2]
-        status, history, _ = call("GET", "/api/history?ids=" + ",".join(some))
-        check("open instance lists only the ids asked for",
-              status == 200 and sorted(r["id"] for r in history) == sorted(some), str(status))
+        status, _, _ = call("GET", "/api/history")
+        check("no history is kept on this instance", status == 404, str(status))
+        gone = ids.pop("credentials.pcapng", None)
+        status, _, _ = call("POST", f"/api/reports/{gone}/discard")
+        check("closing the page discards the report", status == 200, str(status))
+        status, _, _ = call("GET", f"/api/reports/{gone}")
+        check("a discarded report is gone", status == 404, str(status))
 
     a, b = ids.get("scenario.pcapng"), ids.get("scenario2.pcapng")
     status, diff, _ = call("GET", f"/api/compare?baseline={a}&current={b}")

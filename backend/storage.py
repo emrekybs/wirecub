@@ -95,6 +95,10 @@ class LocalStore:
     def get_many(self, keys: list[str]) -> dict[str, bytes | None]:
         return {key: self.get(key) for key in keys}
 
+    def delete_items(self, items: list[dict]) -> None:
+        for item in items:
+            self._path(item["key"]).unlink(missing_ok=True)
+
     def delete_prefix(self, prefix: str) -> int:
         _check_key(prefix)
         target = self.root / prefix.rstrip("/")
@@ -286,6 +290,13 @@ class BlobStore:
                 "url": item["url"],
             })
         return out
+
+    def delete_items(self, items: list[dict]) -> None:
+        urls = [item["url"] for item in items]
+        for start in range(0, len(urls), 500):
+            self._request("POST", f"{self.API}/delete",
+                          body=json.dumps({"urls": urls[start:start + 500]}).encode(),
+                          headers={"content-type": "application/json"})
 
     def delete_prefix(self, prefix: str) -> int:
         urls = [item["url"] for item in self.list(prefix)]

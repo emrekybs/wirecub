@@ -91,12 +91,14 @@
         const minutes = Math.floor(c.time_budget_seconds / 60 + 0.5);
         set('factTime', `${minutes} minute${minutes === 1 ? '' : 's'}`);
       }
-      if (c.retention_days) set('factKeep', `${c.retention_days} day${c.retention_days === 1 ? '' : 's'}`);
-      const key = document.getElementById('factKey');
-      if (key && !c.auth_required) {
-        if (c.hosted) key.textContent = 'Your history is listed only in your own browser; nobody else sees your analyses';
-        else key.remove();
+      if (c.report_ttl_minutes) {
+        const m = c.report_ttl_minutes;
+        const ttl = m === 60 ? 'an hour' : m % 60 === 0 ? `${m / 60} hours` : `${m} minutes`;
+        set('factKeep', ttl);
+        document.querySelectorAll('.ttl').forEach((el) => { el.textContent = ttl; });
       }
+      const key = document.getElementById('factKey');
+      if (key) key.hidden = !c.auth_required;
       if (!c.hosted) {
         // Served by a local install: describe this machine, not Vercel.
         set('runHostedTitle', 'This instance');
@@ -111,8 +113,4 @@
     })
     .catch(() => {});
 
-  fetch('/api/version')
-    .then((r) => (r.ok ? r.json() : null))
-    .then((v) => { if (v && v.version) document.getElementById('footVersion').textContent = v.version; })
-    .catch(() => {});
 })();
