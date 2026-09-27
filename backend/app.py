@@ -47,7 +47,7 @@ from engine import export, reputation
 from engine.analyzer import Analyzer
 from engine.reader import CaptureError, detect_format
 from engine.serialize import build_report
-from storage import BlobStore, LocalStore, StoreError
+from storage import BlobStore, LocalStore, StoreError, set_oidc_token
 
 VERSION = "1.4"
 
@@ -501,6 +501,8 @@ _OPEN_PATHS = {"/api/config", "/api/auth", "/api/health", "/api/version",
 @app.middleware("http")
 async def guard(request: Request, call_next):
     path = request.url.path
+    # On Vercel each request carries a fresh OIDC token for the Blob store.
+    set_oidc_token(request.headers.get("x-vercel-oidc-token"))
     if path.startswith("/api/") and path not in _OPEN_PATHS and not _authorised(request):
         return JSONResponse(
             {"detail": "This WireCub needs its access key.", "auth": True},

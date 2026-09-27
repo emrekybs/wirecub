@@ -17,11 +17,16 @@ namespace.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]{0,300}$")
@@ -129,108 +134,178 @@ class LocalStore:
 
 class BlobStore:
     """
-    Vercel Blob, private access.
+    Vercel Blob, private access, spoken to over its HTTP API.
 
     Private blobs are never reachable by URL alone: every read goes through
-    this server with the store token, which is what a store of packet
-    captures, recovered passwords and carved malware needs.
+    this server with credentials, which is what a store of packet captures,
+    recovered passwords and carved malware needs.
+
+    Two ways in, the same order Vercel's own SDK uses:
+      1. OIDC: a store connected to the project gives BLOB_STORE_ID, and
+         every request to the function carries a short-lived token in the
+         x-vercel-oidc-token header (see set_oidc_token).
+      2. A read-write token in BLOB_READ_WRITE_TOKEN.
     """
 
     kind = "blob"
+    API = os.environ.get("VERCEL_BLOB_API_URL", "https://vercel.com/api/blob")
+    API_VERSION = "12"
+    READ_URL = "https://{store}.private.blob.vercel-storage.com/"
 
     def __init__(self, prefix: str = "wirecub/"):
-        try:
-            from vercel import blob  # noqa: F401
-        except ImportError as exc:  # pragma: no cover - deployment error
-            raise StoreError(
-                "The 'vercel' package is missing. It is listed in "
-                "requirements.txt; redeploy so Vercel installs it."
-            ) from exc
-        if not os.environ.get("BLOB_READ_WRITE_TOKEN"):
+        if not self._credentials(check_only=True):
             raise StoreError(
                 "No Blob store is connected to this project. In the Vercel "
-                "dashboard open Storage, create a Blob store and connect it "
-                "to WireCub, then redeploy."
+                "dashboard open Storage, create a Blob store (Private), "
+                "connect it to this project, then redeploy."
             )
-        self._blob = blob
         self.prefix = prefix
+
+    # -- credentials ----------------------------------------------------
+
+    @staticmethod
+    def _credentials(check_only: bool = False) -> tuple[str, str] | None:
+        store_id = os.environ.get("BLOB_STORE_ID", "").strip()
+        if store_id.startswith("store_"):
+            store_id = store_id[len("store_"):]
+        oidc = _OIDC["token"] or os.environ.get("VERCEL_OIDC_TOKEN", "").strip()
+        if store_id and (oidc or check_only):
+            if oidc:
+                return oidc, store_id
+        rw = (os.environ.get("BLOB_READ_WRITE_TOKEN")
+              or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN") or "").strip()
+        if rw:
+            parts = rw.split("_")
+            return rw, (parts[3] if len(parts) > 3 else "")
+        if store_id and check_only:
+            # Connected through OIDC; the token arrives with the first request.
+            return "", store_id
+        return None
+
+    def _auth(self) -> tuple[str, str]:
+        creds = self._credentials()
+        if not creds or not creds[0]:
+            raise StoreError(
+                "The Blob store is connected but no credential reached this "
+                "request. Check that OIDC is enabled in the project settings "
+                "(Settings → Security → Secure backend access with OIDC "
+                "federation), or add BLOB_READ_WRITE_TOKEN."
+            )
+        return creds
+
+    # -- transport ------------------------------------------------------
+
+    def _request(self, method: str, url: str, body: bytes | None = None,
+                 headers: dict | None = None, api: bool = True,
+                 allow_404: bool = False):
+        token, store_id = self._auth()
+        all_headers = {"authorization": f"Bearer {token}"}
+        if api:
+            all_headers.update({
+                "x-api-version": self.API_VERSION,
+                "x-vercel-blob-store-id": store_id,
+                "x-api-blob-request-id": f"{store_id}:{int(time.time() * 1000)}:{os.urandom(4).hex()}",
+            })
+        all_headers.update(headers or {})
+        last_error = None
+        for attempt in range(4):
+            if api:
+                all_headers["x-api-blob-request-attempt"] = str(attempt)
+            request = urllib.request.Request(url, data=body, method=method, headers=all_headers)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and allow_404:
+                    return 404, b""
+                detail = exc.read()[:300].decode("utf-8", "replace")
+                last_error = f"HTTP {exc.code}: {detail}"
+                if exc.code < 500 and exc.code != 429:
+                    break
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
+                last_error = str(exc)
+            time.sleep(0.4 * (2 ** attempt))
+        raise StoreError(f"Blob {method} failed: {last_error}")
 
     def _full(self, key: str) -> str:
         return self.prefix + _check_key(key)
 
+    # -- operations -----------------------------------------------------
+
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
-        try:
-            self._blob.put(
-                self._full(key), data,
-                access="private",
-                content_type=content_type,
-                add_random_suffix=False,
-                overwrite=True,
-                multipart=len(data) > 8 * 1024 * 1024,
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise StoreError(f"Blob write failed: {exc}") from exc
+        query = urllib.parse.urlencode({"pathname": self._full(key)})
+        self._request("PUT", f"{self.API}/?{query}", body=bytes(data), headers={
+            "x-vercel-blob-access": "private",
+            "x-add-random-suffix": "0",
+            "x-allow-overwrite": "1",
+            "x-content-type": content_type,
+            "content-type": "application/octet-stream",
+        })
 
     def put_file(self, key: str, source: Path, content_type: str = "application/octet-stream") -> None:
         self.put(key, Path(source).read_bytes(), content_type)
 
     def get(self, key: str) -> bytes | None:
-        try:
-            result = self._blob.get(self._full(key), access="private", use_cache=False)
-        except self._blob.BlobNotFoundError:
-            return None
-        except Exception as exc:  # noqa: BLE001
-            raise StoreError(f"Blob read failed: {exc}") from exc
-        if result is None or getattr(result, "status_code", 200) == 404:
-            return None
-        return result.content
+        _, store_id = self._auth()
+        url = (self.READ_URL.format(store=store_id)
+               + f"{urllib.parse.quote(self._full(key))}?cache=0")
+        status, body = self._request("GET", url, api=False, allow_404=True)
+        return None if status == 404 else body
 
     def exists(self, key: str) -> bool:
-        try:
-            self._blob.head(self._full(key))
-            return True
-        except self._blob.BlobNotFoundError:
-            return False
-        except Exception:  # noqa: BLE001
-            return False
+        return self.get(key) is not None
 
     def _list_raw(self, prefix: str):
         cursor = None
         while True:
-            page = self._blob.list_objects(
-                prefix=self.prefix + prefix, cursor=cursor, limit=1000
-            )
-            yield from page.blobs
-            if not page.has_more or not page.cursor:
+            params = {"prefix": self.prefix + prefix, "limit": "1000", "mode": "expanded"}
+            if cursor:
+                params["cursor"] = cursor
+            _, body = self._request("GET", f"{self.API}?{urllib.parse.urlencode(params)}")
+            page = json.loads(body or b"{}")
+            yield from page.get("blobs", [])
+            if not page.get("hasMore") or not page.get("cursor"):
                 break
-            cursor = page.cursor
+            cursor = page["cursor"]
 
     def list(self, prefix: str) -> list[dict]:
         _check_key(prefix)
-        try:
-            return [
-                {
-                    "key": item.pathname[len(self.prefix):],
-                    "size": item.size,
-                    "uploaded": item.uploaded_at.timestamp()
-                    if item.uploaded_at else time.time(),
-                    "url": item.url,
-                }
-                for item in self._list_raw(prefix)
-            ]
-        except Exception as exc:  # noqa: BLE001
-            raise StoreError(f"Blob listing failed: {exc}") from exc
+        out = []
+        for item in self._list_raw(prefix):
+            uploaded = time.time()
+            stamp = item.get("uploadedAt")
+            if stamp:
+                try:
+                    uploaded = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    pass
+            out.append({
+                "key": item["pathname"][len(self.prefix):],
+                "size": item.get("size", 0),
+                "uploaded": uploaded,
+                "url": item["url"],
+            })
+        return out
 
     def delete_prefix(self, prefix: str) -> int:
-        items = self.list(prefix)
-        urls = [item["url"] for item in items]
+        urls = [item["url"] for item in self.list(prefix)]
         for start in range(0, len(urls), 500):
-            try:
-                self._blob.delete(urls[start:start + 500])
-            except Exception as exc:  # noqa: BLE001
-                raise StoreError(f"Blob delete failed: {exc}") from exc
+            self._request("POST", f"{self.API}/delete",
+                          body=json.dumps({"urls": urls[start:start + 500]}).encode(),
+                          headers={"content-type": "application/json"})
         return len(urls)
 
     def get_many(self, keys: list[str]) -> dict[str, bytes | None]:
         with ThreadPoolExecutor(max_workers=8) as pool:
             return dict(zip(keys, pool.map(self.get, keys)))
+
+
+# The newest OIDC token Vercel sent with a request. It is scoped to this
+# project, so any request's token serves every request; the analysis runs
+# in a worker thread, which is why this is shared rather than per request.
+_OIDC = {"token": ""}
+
+
+def set_oidc_token(token: str | None) -> None:
+    if token:
+        _OIDC["token"] = token.strip()
