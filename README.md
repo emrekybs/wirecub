@@ -13,8 +13,6 @@ layer, rebuilds the conversations, pulls out the files and credentials that
 crossed the wire, and ranks what is worth your attention — each finding with
 what was seen, why it matters and what to do next.
 
-![WireCub findings](public/assets/shots/findings.webp)
-
 ## What it finds
 
 - **Attacks** — port scans, C2 beaconing, DNS tunnelling, DGA, SQLi, XSS, path traversal, RCE, Log4Shell, exfiltration, lateral movement, web and reverse shells
@@ -43,11 +41,7 @@ cd backend && python3 app.py
 
 Open <http://localhost:8000>. Local limit is 10 GB per capture and nothing leaves the machine.
 
-## Deploy to Vercel
-
-1. Import this repository in Vercel. No build settings needed.
-2. **Storage → Create → Blob**, connect it to the project.
-3. Add environment variables `WIRECUB_ACCESS_KEY` (the key the app asks for) and `CRON_SECRET` (any random string).
+CCESS_KEY` (the key the app asks for) and `CRON_SECRET` (any random string).
 4. Redeploy.
 
 Hosted limits: 200 MB and 5 minutes per capture. Captures are deleted after analysis, reports after 7 days.
